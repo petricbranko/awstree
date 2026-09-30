@@ -374,7 +374,7 @@ def export(data, path):
 # ---------------------------------------------------------------- output
 
 def render(data, out):
-    html = TEMPLATE.read_text()
+    html = TEMPLATE.read_text(encoding="utf-8")
     page = {**data, "pits": PITS, "export": summarize(data)}
     blob = json.dumps(page, separators=(",", ":"), ensure_ascii=False).replace("</", "<\\/")
     out.write_text(html.replace("__AWSTREE_DATA__", blob), encoding="utf-8")
@@ -398,7 +398,7 @@ def main():
         die("--days must be between 1 and 180 (Cost Explorer keeps ~14 months of daily data).")
 
     if args.source:
-        data = json.loads(Path(args.source).read_text())
+        data = json.loads(Path(args.source).read_text(encoding="utf-8"))
     elif args.demo:
         data = demo(args.days)
     else:
@@ -409,7 +409,7 @@ def main():
                     profile=args.profile or "default")
         if not args.demo:
             OUT.mkdir(exist_ok=True)
-            (OUT / "awstree-data.json").write_text(json.dumps(data))
+            (OUT / "awstree-data.json").write_text(json.dumps(data), encoding="utf-8")
 
     if args.export:
         path = Path(args.export).resolve()
