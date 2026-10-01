@@ -34,6 +34,13 @@ header { grid-column: 1 / -1; display: flex; align-items: center; gap: 14px; pad
 .seg button { background: none; border: 0; color: var(--muted); font: inherit; padding: 4px 11px; border-radius: 4px; cursor: pointer; }
 .seg button.on { background: #222938; color: var(--text); }
 .seg button:hover { color: var(--text); }
+.date-nav { display: inline-flex; align-items: center; gap: 5px; }
+.date-nav button { background: none; border: 1px solid var(--line); color: var(--muted); border-radius: 4px;
+  padding: 1px 7px 2px; cursor: pointer; font: inherit; }
+.date-nav button:hover:not(:disabled) { color: var(--text); border-color: #3a4356; }
+.date-nav button:disabled { opacity: .3; cursor: default; }
+.date-nav input { color-scheme: dark; background: #0a0d12; color: var(--text); border: 1px solid var(--line);
+  border-radius: 4px; padding: 2px 5px; font: inherit; }
 label.chk { display: flex; align-items: center; gap: 6px; color: var(--muted); cursor: pointer; white-space: nowrap; }
 label.chk input { accent-color: var(--accent); margin: 0; }
 #export { background: none; border: 1px solid var(--line); color: var(--muted); font: inherit; padding: 5px 10px;
@@ -121,8 +128,11 @@ kbd { font: 10.5px ui-monospace, Menlo, monospace; color: var(--muted); border: 
     <div class="seg" id="views">
       <button data-v="service">Service</button><button data-v="account">Account</button><button data-v="region">Region</button>
     </div>
+    <div class="seg" id="time">
+      <button data-t="period">Period</button><button data-t="day">Day over day</button>
+    </div>
     <label class="chk"><input type="checkbox" id="change"> Color by change</label>
-    <button id="export" title="Download a JSON summary to give to an AI agent (e)">Export for AI</button>
+    <button id="export" title="Download a full-period JSON summary to give to an AI agent (e)">Export period</button>
     <input id="filter" placeholder="filter  /" autocomplete="off" spellcheck="false">
   </header>
   <div class="sub" id="sub"></div>
@@ -130,7 +140,7 @@ kbd { font: 10.5px ui-monospace, Menlo, monospace; color: var(--muted); border: 
   <aside id="side"></aside>
   <footer>
     <span><kbd>click</kbd>select</span><span><kbd>dbl-click</kbd><kbd>enter</kbd>open</span><span><kbd>⌫</kbd>up</span>
-    <span><kbd>1</kbd><kbd>2</kbd><kbd>3</kbd>view</span><span><kbd>c</kbd>color</span><span><kbd>/</kbd>filter</span><span><kbd>e</kbd>export</span><span><kbd>esc</kbd>clear</span>
+    <span><kbd>1</kbd><kbd>2</kbd><kbd>3</kbd>view</span><span><kbd>d</kbd>day</span><span><kbd>←</kbd><kbd>→</kbd>date</span><span><kbd>c</kbd>color</span><span><kbd>/</kbd>filter</span><span><kbd>e</kbd>export</span><span><kbd>esc</kbd>clear</span>
     <span class="spacer"></span><span id="meta"></span>
   </footer>
 </div>
@@ -142,7 +152,7 @@ const DATA = __AWSTREE_DATA__;
 const N = DATA.days.length, SPLIT = DATA.split, DAYS = N - SPLIT;
 const $ = s => document.querySelector(s);
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
-const state = { view: "service", change: false, filter: "", zoom: null, sel: null };
+const state = { view: "service", time: "period", day: N - 1, change: false, filter: "", zoom: null, sel: null };
 
 // ---------- formatting
 function money(v) {
@@ -157,8 +167,18 @@ function bigMoney(v) {
   return `${v < 0 ? "-" : ""}$${Number(w).toLocaleString("en-US")}<small>.${c}</small>`;
 }
 const pct = v => (v >= 0.1 || v === 0 ? Math.round(v * 100) : (v * 100).toFixed(1)) + "%";
-const day = s => new Date(s + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" });
-const period = () => `${day(DATA.days[SPLIT])} – ${day(DATA.days[N - 1])}`;
+const day = s => new Date(s + "T00:00:00Z").toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" });
+const longDay = s => new Date(s + "T00:00:00Z").toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric", year: "numeric", timeZone: "UTC" });
+const reportPeriod = () => `${day(DATA.days[SPLIT])} – ${day(DATA.days[N - 1])}`;
+const period = () => state.time === "day" ? longDay(DATA.days[state.day]) : reportPeriod();
+const comparisonLabel = () => state.time === "day" ? day(DATA.days[state.day - 1]) : `prev ${DAYS}d`;
+function activeWindow() {
+  if (state.time === "day") return { current: [state.day], previous: [state.day - 1] };
+  return {
+    current: Array.from({ length: DAYS }, (_, i) => SPLIT + i),
+    previous: Array.from({ length: SPLIT }, (_, i) => i),
+  };
+}
 
 // ---------- names and categories
 const SHORT = {
@@ -222,6 +242,7 @@ function color(n) {
 function buildTree(viewKey, filter) {
   const v = DATA.views[viewKey], names = v.names || {};
   const [A, B] = v.dims, q = filter.toLowerCase();
+  const window = activeWindow();
   const root = { kind: "root", name: "all", children: [], daily: new Float64Array(N) };
   const groups = new Map();
   for (const r of v.rows) {
@@ -240,13 +261,13 @@ function buildTree(viewKey, filter) {
       for (const c of n.children) { total(c); for (let i = 0; i < N; i++) n.daily[i] += c.daily[i]; }
       n.children = n.children.filter(c => c.cur >= 0.005).sort((a, b) => b.cur - a.cur);
     }
-    n.prev = 0; n.cur = 0;
-    for (let i = 0; i < N; i++) i < SPLIT ? (n.prev += n.daily[i]) : (n.cur += n.daily[i]);
+    n.prev = window.previous.reduce((sum, i) => sum + n.daily[i], 0);
+    n.cur = window.current.reduce((sum, i) => sum + n.daily[i], 0);
   })(root);
   return root;
 }
 let root = buildTree(state.view, "");
-const grand = buildTree("service", "").cur; // shares are always of the whole bill, even when filtered
+let grand = buildTree("service", "").cur; // shares are always of the active whole bill, even when filtered
 
 // ---------- squarified treemap layout
 function squarify(nodes, x, y, w, h) {
@@ -328,6 +349,7 @@ function render() {
 function renderChrome(base) {
   const v = DATA.views[state.view], [A, B] = v.dims;
   document.querySelectorAll("#views button").forEach(b => b.classList.toggle("on", b.dataset.v === state.view));
+  document.querySelectorAll("#time button").forEach(b => b.classList.toggle("on", b.dataset.t === state.time));
   $("#change").checked = state.change;
   $("#crumbs").innerHTML = `<span>/</span>` + (base === root
     ? `<span class="cur">all ${DIM[A].many}</span>`
@@ -336,18 +358,27 @@ function renderChrome(base) {
   const legend = state.change
     ? [["--down", "down"], ["--neutral", "flat"], ["--up", "up / new"]].map(([c, l]) => `<span><i style="background:var(${c})"></i>${l}</span>`).join("")
     : CATS.map(([k, l]) => `<span><i style="background:var(--${k})"></i>${l}</span>`).join("");
-  $("#sub").innerHTML = `<span><b>${money(root.cur)}</b> · ${period()}</span><span>${root.children.length} ${DIM[A].many} · ${leaves} ${DIM[B].many}</span>
-    ${state.filter ? `<span>filter “${esc(state.filter)}” · ${pct(root.cur / grand)} of bill</span>` : ""}<div class="legend">${legend}</div>`;
+  const nav = state.time === "day" ? `<span class="date-nav">
+    <button data-day-step="-1" title="Previous day" ${state.day <= SPLIT ? "disabled" : ""}>←</button>
+    <input type="date" data-day-picker min="${DATA.days[SPLIT]}" max="${DATA.days[N - 1]}" value="${DATA.days[state.day]}" aria-label="Selected UTC day">
+    <button data-day-step="1" title="Next day" ${state.day >= N - 1 ? "disabled" : ""}>→</button>
+    <span>vs <b>${day(DATA.days[state.day - 1])}</b></span></span>` : "";
+  $("#sub").innerHTML = `<span><b>${money(root.cur)}</b> · ${period()}</span>${nav}<span>${root.children.length} ${DIM[A].many} · ${leaves} ${DIM[B].many}</span>
+    ${state.filter ? `<span>filter “${esc(state.filter)}” · ${pct(grand ? root.cur / grand : 0)} of bill</span>` : ""}<div class="legend">${legend}</div>`;
 }
 
 function spark(n) {
   const max = Math.max(...n.daily, 0.0001), bw = 100 / N;
   const bars = Array.from(n.daily, (v, i) => {
     const h = Math.max(0, (v / max) * 44);
-    return `<rect x="${(i * bw).toFixed(2)}" y="${(46 - h).toFixed(2)}" width="${(bw * 0.7).toFixed(2)}" height="${h.toFixed(2)}" fill="${i < SPLIT ? "#3a4252" : "var(--accent)"}"/>`;
+    const selectable = i >= SPLIT;
+    const fill = state.time === "day"
+      ? (i === state.day ? "var(--accent)" : selectable ? "#725738" : "#303746")
+      : (i < SPLIT ? "#3a4252" : "var(--accent)");
+    return `<rect x="${(i * bw).toFixed(2)}" y="${(46 - h).toFixed(2)}" width="${(bw * 0.7).toFixed(2)}" height="${h.toFixed(2)}" fill="${fill}" ${selectable ? `data-day="${i}" style="cursor:pointer"` : ""}><title>${longDay(DATA.days[i])}: ${money(v)}</title></rect>`;
   }).join("");
   return `<div class="spark"><svg viewBox="0 0 100 46" preserveAspectRatio="none">${bars}</svg>
-    <div class="axis"><span>${day(DATA.days[0])}</span><span>previous ${DAYS}d | last ${DAYS}d</span><span>${day(DATA.days[N - 1])}</span></div></div>`;
+    <div class="axis"><span>${day(DATA.days[0])}</span><span>${state.time === "day" ? "click a day · selected vs prior day" : `previous ${DAYS}d | last ${DAYS}d`}</span><span>${day(DATA.days[N - 1])}</span></div></div>`;
 }
 
 function renderSide() {
@@ -360,18 +391,25 @@ function renderSide() {
   const kind = n.kind === "root" ? "whole bill" : DIM[n.dim].one;
   const title = n.kind === "root" ? (state.filter ? `“${state.filter}”` : "Everything") : n.name;
 
-  let html = `<section><div class="h">Selection</div>
-    <div class="sel-name">${esc(title)}</div><div class="sel-path">${esc(path)}</div>
-    <div class="big">${bigMoney(n.cur)}</div><div style="color:var(--dim)">last ${DAYS} days · ${period()}</div>
-    <div class="bar"><i style="width:${Math.min(100, share * 100)}%"></i></div>
-    <div class="stats">
-      <div><span>of bill</span>${pct(share)}</div>
+  const stats = state.time === "day"
+    ? `<div><span>of day</span>${pct(share)}</div>
+      <div><span>vs ${day(DATA.days[state.day - 1])}</span>${change}</div>
+      <div><span>previous day</span>${money(n.prev)}</div>
+      <div><span>day change</span>${d > 0 ? "+" : ""}${money(d)}</div>
+      <div><span>kind</span>${esc(kind)}</div>
+      <div><span>category</span>${n.kind === "root" ? "–" : (CATS.find(c => c[0] === category(n)) || [, "–"])[1]}</div>`
+    : `<div><span>of bill</span>${pct(share)}</div>
       <div><span>vs prev ${DAYS}d</span>${change}</div>
       <div><span>per day</span>${money(n.cur / DAYS)}</div>
       <div><span>monthly pace</span>${money((n.cur / DAYS) * 30.4)}</div>
       <div><span>kind</span>${esc(kind)}</div>
-      <div><span>category</span>${n.kind === "root" ? "–" : (CATS.find(c => c[0] === category(n)) || [, "–"])[1]}</div>
-    </div>${spark(n)}</section>`;
+      <div><span>category</span>${n.kind === "root" ? "–" : (CATS.find(c => c[0] === category(n)) || [, "–"])[1]}</div>`;
+
+  let html = `<section><div class="h">Selection</div>
+    <div class="sel-name">${esc(title)}</div><div class="sel-path">${esc(path)}</div>
+    <div class="big">${bigMoney(n.cur)}</div><div style="color:var(--dim)">${state.time === "day" ? "UTC day" : `last ${DAYS} days`} · ${period()}</div>
+    <div class="bar"><i style="width:${Math.min(100, share * 100)}%"></i></div>
+    <div class="stats">${stats}</div>${spark(n)}</section>`;
 
   const hints = worthALook();
   if (hints.length) {
@@ -387,7 +425,7 @@ function renderSide() {
   if (types.length) {
     const net = types.reduce((s, [, v]) => s + v, 0), gross = types.reduce((s, [, v]) => s + Math.max(v, 0), 0);
     const credits = -types.reduce((s, [, v]) => s + Math.min(v, 0), 0);
-    html += `<section class="bill"><div class="h">Bill · ${period()}</div>
+    html += `<section class="bill"><div class="h">${state.time === "day" ? "Report-period bill" : "Bill"} · ${reportPeriod()}</div>
       <div class="big">${bigMoney(net)} <small>net</small></div>
       <div class="bar"><i style="width:${gross ? (net / gross) * 100 : 0}%;background:var(--storage)"></i></div>
       ${types.map(([k, v]) => `<div class="bill-row"><span>${esc(k.replace(/([a-z])([A-Z])/g, "$1 $2"))}</span><b>${money(v)}</b></div>`).join("")}
@@ -410,7 +448,8 @@ function worthALook() {
   for (const n of leaves) {
     const d = n.cur - n.prev;
     if (seen.has(n) || d < t.cur * 0.005 || d < 1) continue;
-    const why = n.prev < 0.01 ? "new this period" : `up ${pct(d / n.prev)} (+${money(d)}) vs previous ${DAYS}d`;
+    const why = n.prev < 0.01 ? (state.time === "day" ? "new this day" : "new this period")
+      : `up ${pct(d / n.prev)} (+${money(d)}) vs ${comparisonLabel()}`;
     if (n.prev < 0.01 || d / n.prev > 0.2) out.push({ n, why, c: "var(--up)", d });
   }
   const pits = out.filter(h => !h.d).sort((a, b) => b.n.cur - a.n.cur).slice(0, 3);
@@ -423,6 +462,23 @@ function setView(v) {
   if (!DATA.views[v] || v === state.view) return;
   state.view = v; state.zoom = null; state.sel = null;
   root = buildTree(v, state.filter); render();
+}
+function rebuildTree() {
+  root = buildTree(state.view, state.filter);
+  grand = buildTree("service", "").cur;
+  _hints = null;
+  if (state.zoom && !zoomed()) state.zoom = null;
+}
+function setTime(t) {
+  if (!["period", "day"].includes(t) || t === state.time) return;
+  state.time = t; state.sel = null;
+  rebuildTree(); render();
+}
+function setDay(i) {
+  const next = Math.max(SPLIT, Math.min(N - 1, i));
+  if (state.time === "day" && next === state.day) return;
+  state.time = "day"; state.day = next; state.sel = null;
+  rebuildTree(); render();
 }
 function select(n) {
   if (state.sel?._el) state.sel._el.classList.remove("sel");
@@ -442,15 +498,26 @@ function up() {
 map.addEventListener("click", e => { const c = e.target.closest(".cell"); select(c ? c._n : null); });
 map.addEventListener("dblclick", e => { const c = e.target.closest(".cell"); if (c) open(c._n); });
 $("#views").addEventListener("click", e => e.target.dataset.v && setView(e.target.dataset.v));
+$("#time").addEventListener("click", e => e.target.dataset.t && setTime(e.target.dataset.t));
 $("#change").addEventListener("change", e => { state.change = e.target.checked; render(); });
 $("#crumbs").addEventListener("click", e => { if (e.target.closest("[data-up]")) up(); });
+$("#sub").addEventListener("click", e => {
+  const step = e.target.closest("[data-day-step]");
+  if (step) setDay(state.day + Number(step.dataset.dayStep));
+});
+$("#sub").addEventListener("change", e => {
+  if (!e.target.matches("[data-day-picker]")) return;
+  const i = DATA.days.indexOf(e.target.value);
+  if (i >= SPLIT) setDay(i);
+});
 $("#filter").addEventListener("input", e => {
   state.filter = e.target.value.trim(); state.sel = null;
-  root = buildTree(state.view, state.filter);
-  if (state.zoom && !zoomed()) state.zoom = null;
+  rebuildTree();
   render();
 });
 $("#side").addEventListener("click", e => {
+  const bar = e.target.closest("[data-day]");
+  if (bar) { setDay(Number(bar.dataset.day)); return; }
   const h = e.target.closest("[data-hint]");
   if (!h) return;
   const leaf = worthALook()[+h.dataset.hint].n;
@@ -461,17 +528,20 @@ $("#side").addEventListener("click", e => {
   render();
 });
 document.addEventListener("keydown", e => {
-  const typing = e.target === $("#filter");
+  const typing = e.target === $("#filter"), editing = e.target.matches("input");
   if (e.key === "Escape") {
     if (typing || state.filter) { $("#filter").value = ""; $("#filter").blur(); if (state.filter) $("#filter").dispatchEvent(new Event("input")); }
     else up();
     return;
   }
-  if (typing || e.metaKey || e.ctrlKey || e.altKey) return;
+  if (editing || e.metaKey || e.ctrlKey || e.altKey) return;
   if (e.key === "/") { e.preventDefault(); $("#filter").focus(); }
   else if (e.key === "Enter") open(state.sel);
   else if (e.key === "Backspace") { e.preventDefault(); up(); }
   else if (e.key === "e" && DATA.export) exportJSON();
+  else if (e.key === "d") setTime(state.time === "day" ? "period" : "day");
+  else if (e.key === "ArrowLeft" && state.time === "day") { e.preventDefault(); setDay(state.day - 1); }
+  else if (e.key === "ArrowRight" && state.time === "day") { e.preventDefault(); setDay(state.day + 1); }
   else if (e.key === "c" || e.key === "t") { state.change = !state.change; render(); }
   else if (["1", "2", "3"].includes(e.key)) setView(["service", "account", "region"][+e.key - 1]);
 });
@@ -489,7 +559,7 @@ map.addEventListener("mousemove", e => {
   const c = e.target.closest(".cell");
   if (!c) { tip.style.display = "none"; return; }
   const n = c._n, d = n.cur - n.prev;
-  const ch = n.prev < 0.01 ? "new" : `${d >= 0 ? "+" : ""}${pct(d / n.prev)} vs prev`;
+  const ch = n.prev < 0.01 ? "new" : `${d >= 0 ? "+" : ""}${pct(d / n.prev)} vs ${comparisonLabel()}`;
   tip.innerHTML = `<div class="t1">${n.kind === "leaf" ? esc(n.parent.name) + " / " : ""}<b>${esc(n.name)}</b></div>
     <div class="t2">${money(n.cur)} · ${pct(grand ? n.cur / grand : 0)} of bill · ${ch}</div>`;
   tip.style.display = "block";

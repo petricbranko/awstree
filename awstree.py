@@ -91,8 +91,12 @@ def explain(err):
     return "AWS error: " + err + ("\n  -> " + "\n  -> ".join(hints) if hints else "")
 
 
+def utc_today():
+    return dt.datetime.now(dt.timezone.utc).date()
+
+
 def fetch(profile, days, metric):
-    end = dt.date.today()  # Cost Explorer's End is exclusive, so this means "through yesterday"
+    end = utc_today()  # Cost Explorer days are UTC; End is exclusive, so this means "through yesterday"
     start = end - dt.timedelta(days=2 * days)  # current window + previous window, for the "vs prev" deltas
     dates = [(start + dt.timedelta(i)).isoformat() for i in range(2 * days)]
     index = {d: i for i, d in enumerate(dates)}
@@ -209,7 +213,7 @@ DEMO = [
 
 def demo(days):
     rnd = random.Random(7)
-    end = dt.date.today()
+    end = utc_today()
     n = 2 * days
     dates = [(end - dt.timedelta(n - i)).isoformat() for i in range(n)]
     weekend = [dt.date.fromisoformat(d).weekday() >= 5 for d in dates]
@@ -405,7 +409,7 @@ def main():
         print(f"awstree: reading the last {args.days} days (+{args.days} before, for comparison) from Cost Explorer")
         data = fetch(args.profile, args.days, args.metric)
     if not args.source:
-        data.update(generated=dt.datetime.now().strftime("%Y-%m-%d %H:%M"), metric=args.metric,
+        data.update(generated=dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%d %H:%M UTC"), metric=args.metric,
                     profile=args.profile or "default")
         if not args.demo:
             OUT.mkdir(exist_ok=True)

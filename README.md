@@ -14,15 +14,16 @@ python3 awstree.py --demo                  # try it with fake data, no AWS neede
 python3 awstree.py --profile my-profile    # your real bill
 ```
 
-The page opens in your browser. It shows the last 30 days, compared with the 30 days before.
+The page opens in your browser. It shows the last 30 days, compared with the 30 days before. Switch to **Day over day** to inspect any day in that range against the preceding UTC day.
 
 ## What you get
 
 - **Treemap** of spend by service → usage type. Press `2` to group by account and `3` to group by region.
 - **Color by change** (`c`): red where spend grew, green where it shrank.
-- **Selection panel:** cost, share of the bill, change vs the previous period, monthly pace and a daily chart.
+- **Day-over-day review** (`d`): pick a UTC date or click a chart bar to compare it with the preceding day. Use the arrow keys to move through dates.
+- **Selection panel:** cost, share of the bill or day, previous-period or previous-day change, and a clickable daily chart.
 - **Worth a look:** the fastest-growing costs plus common money pits: NAT data processing, idle IPs, gp2 volumes, old snapshots, previous-gen instances and extended-support fees.
-- **Export for AI:** a JSON summary to hand to any AI agent (see below).
+- **Export period:** a full-period JSON summary to hand to any AI agent (see below).
 
 Click to select, double-click to zoom in, `⌫` to go back up, `/` to filter.
 
@@ -44,7 +45,7 @@ python3 awstree.py --from out/awstree-data.json
 python3 awstree.py --from out/awstree-data.json --export
 ```
 
-This writes `out/awstree-export.json`, a compact summary (about 50 KB) that includes instructions for the agent. It has totals, breakdowns by service, account and region, every line item with its change vs the previous period, the top growers and the flagged money pits. Give it to an AI agent and ask *"where can I save money?"*. The **Export for AI** button in the page (or `e`) downloads the same file.
+This writes `out/awstree-export.json`, a compact full-period summary (about 50 KB) that includes instructions for the agent. It has totals, breakdowns by service, account and region, every line item with its change vs the previous period, the top growers and the flagged money pits. Give it to an AI agent and ask *"where can I save money?"*. The **Export period** button in the page (or `e`) downloads the same file.
 
 ## Options
 
